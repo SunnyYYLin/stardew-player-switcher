@@ -1,0 +1,10 @@
+{
+  "Name": "Stardew Player Switcher",
+  "Author": "sunnylin",
+  "Version": "0.1.2",
+  "Description": "Adds a host picker to the co-op host flow so you can choose which farmer becomes the current save owner before load.",
+  "UniqueID": "sunnylin.StardewPlayerSwitcher",
+  "EntryDll": "StardewPlayerSwitcher.dll",
+  "MinimumApiVersion": "4.0.0",
+  "UpdateKeys": []
+}

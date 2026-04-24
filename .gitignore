@@ -1,0 +1,15 @@
+bin/
+obj/
+examples/
+
+*.user
+*.suo
+*.zip
+
+.vs/
+.idea/
+
+TestResults/
+
+Thumbs.db
+.DS_Store
