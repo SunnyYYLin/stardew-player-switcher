@@ -1,0 +1,23 @@
+{
+  "button.back": "返回",
+  "button.start": "开始",
+  "button.switch": "切换房主",
+  "candidate.hand": "农夫",
+  "candidate.host": "房主",
+  "candidate.id": "ID：{{value}}",
+  "command.choose_host.description": "打开当前联机主机存档的房主选择界面。",
+  "footer.selected": "已选",
+  "log.no_host_slot": "当前联机主机菜单里没有可用的主机存档槽位。",
+  "log.open_coop_first": "请先打开 联机 -> 主持，再用这个命令测试房主选择界面。",
+  "log.open_picker_failed": "打开房主选择界面失败，已回退到游戏默认流程。",
+  "menu.host": "当前房主",
+  "menu.save": "存档",
+  "menu.title": "选择房主",
+  "panel.farmers": "农场角色",
+  "status.check_smapi_log": "请查看 SMAPI 日志",
+  "status.current": "当前房主，可直接开始。",
+  "status.start_failed": "启动失败：{{detail}}",
+  "status.starting": "正在启动存档...",
+  "status.switch": "会先备份，再切换并开始。",
+  "status.switching": "正在切换房主..."
+}

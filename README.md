@@ -2,6 +2,10 @@
 
 A SMAPI mod for Stardew Valley co-op that lets you choose which farmer should host a save right after clicking a host save slot.
 
+## Screenshot
+
+![Choose Host menu screenshot](img/gui.png)
+
 ## What It Does
 
 The in-game flow is:
@@ -14,6 +18,8 @@ The in-game flow is:
 6. The mod swaps the save owner if needed, then starts the game right away.
 
 This is designed for saves where the current `<player>` farmer is not the person you want to host with for the next session.
+
+The host picker UI currently supports English and Simplified Chinese through SMAPI `i18n`.
 
 ## Design
 
@@ -92,3 +98,4 @@ The current project expects a local Stardew Valley + SMAPI installation so the S
 
 - The repository intentionally ignores `examples/` so local sample saves are not pushed publicly by default.
 - The in-repo version is currently focused on the co-op host flow, not the title screen prototype used earlier during development.
+- Public releases now include a GitHub update key so SMAPI can detect new versions from this repository.

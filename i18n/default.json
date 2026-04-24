@@ -1,0 +1,23 @@
+{
+  "button.back": "BACK",
+  "button.start": "START",
+  "button.switch": "SWITCH HOST",
+  "candidate.hand": "HAND",
+  "candidate.host": "HOST",
+  "candidate.id": "ID: {{value}}",
+  "command.choose_host.description": "Open the host picker for the current co-op host save.",
+  "footer.selected": "SELECTED",
+  "log.no_host_slot": "No host save slot is currently available in the co-op menu.",
+  "log.open_coop_first": "Open Co-op -> Host first, then use this command to test the picker.",
+  "log.open_picker_failed": "Failed to open host picker. Using the game's default host flow.",
+  "menu.host": "HOST",
+  "menu.save": "SAVE",
+  "menu.title": "CHOOSE HOST",
+  "panel.farmers": "FARMERS",
+  "status.check_smapi_log": "CHECK SMAPI LOG",
+  "status.current": "READY TO START.",
+  "status.start_failed": "START FAILED: {{detail}}",
+  "status.starting": "STARTING SAVE...",
+  "status.switch": "BACKUP. SWITCH. START.",
+  "status.switching": "SWITCHING HOST..."
+}

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using StardewModdingAPI;
 using StardewPlayerSwitcher.Models;
 using StardewPlayerSwitcher.Services;
 using StardewValley;
@@ -13,16 +14,32 @@ namespace StardewPlayerSwitcher.UI;
 
 internal sealed class CoopHostPickerMenu : IClickableMenu
 {
-    private const int MenuWidth = 1080;
-    private const int MenuHeight = 760;
-    private const int RowHeight = 108;
-    private const int RowGap = 12;
-    private const int MaxVisibleCandidates = 3;
+    private const int PreferredMenuWidth = 1040;
+    private const int PreferredMenuHeight = 680;
+    private const int MinimumMenuWidth = 840;
+    private const int MinimumMenuHeight = 560;
+    private const int OuterMargin = 24;
+    private const int OuterPadding = 28;
+    private const int SectionGap = 14;
+    private const int FooterHeight = 124;
+    private const int CandidateHeaderHeight = 58;
+    private const int CandidateInset = 22;
+    private const int RowHeight = 86;
+    private const int RowGap = 10;
+    private const int ButtonHeight = 56;
+    private const int MinimumConfirmButtonWidth = 180;
+    private const int MaximumConfirmButtonWidth = 236;
+    private const int MinimumCancelButtonWidth = 108;
+    private const int MaximumCancelButtonWidth = 156;
+    private const int ArrowButtonWidth = 60;
+    private const int ArrowButtonHeight = 42;
 
     private readonly SaveSlotSummary save;
     private readonly SaveSwapService saveSwapService;
+    private readonly ITranslationHelper i18n;
     private readonly Action<HostCandidate> onConfirm;
     private readonly Action onCancel;
+    private readonly bool useRegularFont;
 
     private readonly List<ClickableComponent> candidateComponents = new();
 
@@ -31,9 +48,12 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
     private ClickableComponent upButton = null!;
     private ClickableComponent downButton = null!;
 
+    private Rectangle headerBounds;
     private Rectangle candidatePanelBounds;
     private Rectangle footerBounds;
+    private Rectangle statusTextBounds;
     private int candidateScrollIndex;
+    private int visibleCandidateCount;
     private HostCandidate selectedCandidate;
     private string statusMessage;
     private Color statusColor = Game1.textColor;
@@ -42,21 +62,25 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
     public CoopHostPickerMenu(
         SaveSlotSummary save,
         SaveSwapService saveSwapService,
+        ITranslationHelper i18n,
         Action<HostCandidate> onConfirm,
         Action onCancel)
         : base(
-            (Game1.viewport.Width - MenuWidth) / 2,
-            (Game1.viewport.Height - MenuHeight) / 2,
-            MenuWidth,
-            MenuHeight,
+            0,
+            0,
+            0,
+            0,
             showUpperRightCloseButton: false)
     {
         this.save = save;
         this.saveSwapService = saveSwapService;
+        this.i18n = i18n;
         this.onConfirm = onConfirm;
         this.onCancel = onCancel;
+        this.useRegularFont = this.i18n.Locale.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
         this.selectedCandidate = save.Candidates.FirstOrDefault(candidate => candidate.IsCurrentHost) ?? save.Candidates[0];
-        this.statusMessage = $"Pick the farmer who should host {save.FarmName}.";
+        this.statusMessage = string.Empty;
+        this.UpdateSelectionStatus();
 
         this.initializeUpperRightCloseButton();
         this.RefreshLayout();
@@ -86,13 +110,15 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
             return;
         }
 
-        if (this.upButton.containsPoint(x, y))
+        bool showScrollButtons = this.save.Candidates.Count > this.visibleCandidateCount;
+
+        if (showScrollButtons && this.upButton.containsPoint(x, y))
         {
             this.ScrollCandidates(-1);
             return;
         }
 
-        if (this.downButton.containsPoint(x, y))
+        if (showScrollButtons && this.downButton.containsPoint(x, y))
         {
             this.ScrollCandidates(1);
             return;
@@ -109,10 +135,7 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
                 continue;
 
             this.selectedCandidate = this.save.Candidates[candidateIndex];
-            this.statusMessage = this.selectedCandidate.IsCurrentHost
-                ? $"{this.selectedCandidate.Name} is already the host. START will load the save as-is."
-                : $"{this.selectedCandidate.Name} will become host, then the save will start.";
-            this.statusColor = Game1.textColor;
+            this.UpdateSelectionStatus();
             Game1.playSound("smallSelect");
             return;
         }
@@ -151,43 +174,62 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         IClickableMenu.drawTextureBox(b, this.xPositionOnScreen, this.yPositionOnScreen, this.width, this.height, Color.White);
         this.upperRightCloseButton.draw(b);
 
-        SpriteText.drawString(b, "CHOOSE HOST", this.xPositionOnScreen + 32, this.yPositionOnScreen + 24, color: Game1.textColor);
-        this.DrawValueLine(b, "SAVE", this.save.FarmName, this.xPositionOnScreen + 34, this.yPositionOnScreen + 76, this.width - 140);
-        this.DrawValueLine(b, "CURRENT", this.save.CurrentHostName, this.xPositionOnScreen + 34, this.yPositionOnScreen + 106, this.width - 140);
-        this.DrawWrappedPixelText(
-            b,
-            "Choose a farmer below. Clicking START will load the game immediately.",
-            new Rectangle(this.xPositionOnScreen + 34, this.yPositionOnScreen + 136, this.width - 68, 34),
-            new Color(80, 50, 20));
-
-        this.DrawPanel(b, this.candidatePanelBounds, "FARMERS");
-        this.DrawPanel(b, this.footerBounds, "STATUS");
+        this.DrawHeader(b);
+        this.DrawPanel(b, this.candidatePanelBounds, this.T("panel.farmers"));
+        this.DrawPanel(b, this.footerBounds, string.Empty);
         this.DrawCandidates(b);
         this.DrawFooter(b);
         this.DrawButton(b, this.confirmButton, this.GetConfirmLabel(), enabled: !this.isWorking);
-        this.DrawButton(b, this.cancelButton, "BACK", enabled: !this.isWorking);
-        this.DrawArrowButton(b, this.upButton, !this.isWorking && this.candidateScrollIndex > 0, pointsUp: true);
-        this.DrawArrowButton(b, this.downButton, !this.isWorking && this.candidateScrollIndex + MaxVisibleCandidates < this.save.Candidates.Count, pointsUp: false);
+        this.DrawButton(b, this.cancelButton, this.T("button.back"), enabled: !this.isWorking);
+
+        if (this.save.Candidates.Count > this.visibleCandidateCount)
+        {
+            this.DrawArrowButton(b, this.upButton, !this.isWorking && this.candidateScrollIndex > 0, pointsUp: true);
+            this.DrawArrowButton(b, this.downButton, !this.isWorking && this.candidateScrollIndex + this.visibleCandidateCount < this.save.Candidates.Count, pointsUp: false);
+        }
 
         this.drawMouse(b);
     }
 
     private void RefreshLayout()
     {
-        this.xPositionOnScreen = (Game1.viewport.Width - MenuWidth) / 2;
-        this.yPositionOnScreen = (Game1.viewport.Height - MenuHeight) / 2;
-        this.width = MenuWidth;
-        this.height = MenuHeight;
+        this.width = ResolveMenuDimension(Game1.viewport.Width, PreferredMenuWidth, MinimumMenuWidth);
+        this.height = ResolveMenuDimension(Game1.viewport.Height, PreferredMenuHeight, MinimumMenuHeight);
+        this.xPositionOnScreen = (Game1.viewport.Width - this.width) / 2;
+        this.yPositionOnScreen = (Game1.viewport.Height - this.height) / 2;
 
-        this.upperRightCloseButton.bounds = new Rectangle(this.xPositionOnScreen + this.width - 96, this.yPositionOnScreen + 16, 64, 64);
+        this.upperRightCloseButton.bounds = new Rectangle(this.xPositionOnScreen + this.width - 80, this.yPositionOnScreen + 12, 64, 64);
 
-        this.candidatePanelBounds = new Rectangle(this.xPositionOnScreen + 32, this.yPositionOnScreen + 184, this.width - 64, 412);
-        this.footerBounds = new Rectangle(this.xPositionOnScreen + 32, this.yPositionOnScreen + 614, this.width - 64, 114);
+        int pixelLineHeight = this.GetLineHeight();
+        int contentLeft = this.xPositionOnScreen + OuterPadding;
+        int contentTop = this.yPositionOnScreen + OuterPadding;
+        int contentWidth = this.width - (OuterPadding * 2);
+        int headerHeight = (pixelLineHeight * 3) + 12;
+        int footerY = this.yPositionOnScreen + this.height - OuterPadding - FooterHeight;
 
-        this.confirmButton = new ClickableComponent(new Rectangle(this.footerBounds.Right - 258, this.footerBounds.Y + 30, 214, 52), "Confirm");
-        this.cancelButton = new ClickableComponent(new Rectangle(this.footerBounds.X + 18, this.footerBounds.Y + 30, 126, 52), "Cancel");
-        this.upButton = new ClickableComponent(new Rectangle(this.candidatePanelBounds.Right - 154, this.candidatePanelBounds.Y + 12, 62, 40), "Up");
-        this.downButton = new ClickableComponent(new Rectangle(this.candidatePanelBounds.Right - 82, this.candidatePanelBounds.Y + 12, 62, 40), "Down");
+        this.headerBounds = new Rectangle(contentLeft, contentTop, contentWidth, headerHeight);
+        this.footerBounds = new Rectangle(contentLeft, footerY, contentWidth, FooterHeight);
+
+        int candidateY = this.headerBounds.Bottom + SectionGap;
+        int candidateHeight = Math.Max(RowHeight + CandidateHeaderHeight + CandidateInset, this.footerBounds.Y - SectionGap - candidateY);
+        this.candidatePanelBounds = new Rectangle(contentLeft, candidateY, contentWidth, candidateHeight);
+        this.visibleCandidateCount = this.GetVisibleCandidateCount();
+        this.candidateScrollIndex = Math.Clamp(this.candidateScrollIndex, 0, Math.Max(0, this.save.Candidates.Count - this.visibleCandidateCount));
+
+        int buttonY = this.footerBounds.Y + ((this.footerBounds.Height - ButtonHeight) / 2);
+        int confirmButtonWidth = this.GetConfirmButtonWidth();
+        int cancelButtonWidth = this.GetCancelButtonWidth();
+        this.confirmButton = new ClickableComponent(new Rectangle(this.footerBounds.Right - confirmButtonWidth - 18, buttonY, confirmButtonWidth, ButtonHeight), "Confirm");
+        this.cancelButton = new ClickableComponent(new Rectangle(this.footerBounds.X + 18, buttonY, cancelButtonWidth, ButtonHeight), "Cancel");
+        this.statusTextBounds = new Rectangle(
+            this.cancelButton.bounds.Right + 20,
+            this.footerBounds.Y + 24,
+            Math.Max(120, this.confirmButton.bounds.X - this.cancelButton.bounds.Right - 40),
+            this.footerBounds.Height - 48);
+
+        int arrowY = this.candidatePanelBounds.Y + 12;
+        this.upButton = new ClickableComponent(new Rectangle(this.candidatePanelBounds.Right - 140, arrowY, ArrowButtonWidth, ArrowButtonHeight), "Up");
+        this.downButton = new ClickableComponent(new Rectangle(this.candidatePanelBounds.Right - 72, arrowY, ArrowButtonWidth, ArrowButtonHeight), "Down");
 
         this.RefreshClickableComponents();
     }
@@ -196,13 +238,13 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
     {
         this.candidateComponents.Clear();
 
-        int candidateListTop = this.candidatePanelBounds.Y + 72;
-        int candidateWidth = this.candidatePanelBounds.Width - 48;
-        int visibleCount = Math.Min(MaxVisibleCandidates, this.save.Candidates.Count - this.candidateScrollIndex);
+        int candidateListTop = this.candidatePanelBounds.Y + CandidateHeaderHeight;
+        int candidateWidth = this.candidatePanelBounds.Width - (CandidateInset * 2);
+        int visibleCount = Math.Min(this.visibleCandidateCount, this.save.Candidates.Count - this.candidateScrollIndex);
         for (int index = 0; index < visibleCount; index++)
         {
             Rectangle bounds = new(
-                this.candidatePanelBounds.X + 24,
+                this.candidatePanelBounds.X + CandidateInset,
                 candidateListTop + index * (RowHeight + RowGap),
                 candidateWidth,
                 RowHeight);
@@ -210,10 +252,25 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         }
     }
 
+    private void DrawHeader(SpriteBatch b)
+    {
+        int x = this.headerBounds.X;
+        int y = this.headerBounds.Y;
+        int maxWidth = this.headerBounds.Width - 12;
+        int lineHeight = this.GetLineHeight();
+
+        this.DrawUiText(b, this.T("menu.title"), x, y, maxWidth, Game1.textColor);
+        y += lineHeight + 2;
+        this.DrawValueLine(b, this.T("menu.save"), this.save.FarmName, x, y, maxWidth);
+        y += lineHeight - 2;
+        this.DrawValueLine(b, this.T("menu.host"), this.save.CurrentHostName, x, y, maxWidth);
+    }
+
     private void DrawPanel(SpriteBatch b, Rectangle bounds, string title)
     {
         IClickableMenu.drawTextureBox(b, bounds.X, bounds.Y, bounds.Width, bounds.Height, Color.White);
-        SpriteText.drawString(b, title, bounds.X + 18, bounds.Y + 16, color: Game1.textColor);
+        if (!string.IsNullOrWhiteSpace(title))
+            this.DrawUiText(b, title, bounds.X + 18, bounds.Y + 16, bounds.Width - 36, Game1.textColor);
     }
 
     private void DrawCandidates(SpriteBatch b)
@@ -231,24 +288,29 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
             this.DrawListItem(b, component.bounds, isSelected);
 
             string nameLabel = candidate.Name;
-            string roleLabel = candidate.IsCurrentHost ? "CURRENT HOST" : "FARMHAND";
-            string homeLabel = string.IsNullOrWhiteSpace(candidate.HomeLocation)
-                ? "HOME UNKNOWN"
-                : $"HOME {candidate.HomeLocation}";
+            string roleLabel = candidate.IsCurrentHost ? this.T("candidate.host") : this.T("candidate.hand");
+            string idLabel = this.T("candidate.id", new { value = FormatShortId(candidate.UniqueMultiplayerId) });
+            int roleWidth = this.MeasureTextWidth(roleLabel);
+            int nameMaxWidth = component.bounds.Width - roleWidth - 44;
+            Color roleColor = candidate.IsCurrentHost
+                ? new Color(20, 92, 52)
+                : new Color(120, 72, 24);
 
-            SpriteText.drawString(b, TrimPixelText(nameLabel, component.bounds.Width - 28), component.bounds.X + 14, component.bounds.Y + 12, color: Game1.textColor);
-            SpriteText.drawString(b, roleLabel, component.bounds.X + 14, component.bounds.Y + 44, color: new Color(20, 92, 52));
-            SpriteText.drawString(b, TrimPixelText(homeLabel, component.bounds.Width - 28), component.bounds.X + 14, component.bounds.Y + 74, color: new Color(80, 50, 20));
+            this.DrawUiText(b, nameLabel, component.bounds.X + 14, component.bounds.Y + 10, nameMaxWidth, Game1.textColor);
+            this.DrawUiText(b, roleLabel, component.bounds.Right - roleWidth - 14, component.bounds.Y + 10, roleWidth, roleColor);
+            this.DrawUiText(b, idLabel, component.bounds.X + 14, component.bounds.Y + 42, component.bounds.Width - 28, new Color(80, 50, 20));
         }
     }
 
     private void DrawFooter(SpriteBatch b)
     {
-        this.DrawWrappedPixelText(
-            b,
-            this.statusMessage,
-            new Rectangle(this.footerBounds.X + 164, this.footerBounds.Y + 18, this.footerBounds.Width - 440, 76),
-            this.statusColor);
+        int x = this.statusTextBounds.X;
+        int y = this.statusTextBounds.Y;
+        int lineHeight = this.GetLineHeight();
+
+        this.DrawValueLine(b, this.T("footer.selected"), this.selectedCandidate.Name, x, y, this.statusTextBounds.Width);
+        y += lineHeight - 2;
+        this.DrawUiText(b, this.statusMessage, x, y, this.statusTextBounds.Width, this.statusColor);
     }
 
     private void DrawListItem(SpriteBatch b, Rectangle bounds, bool isSelected)
@@ -267,15 +329,7 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         Color tint = enabled ? Color.White : Color.Gray;
         Color textColor = enabled ? Game1.textColor : new Color(96, 96, 96);
         IClickableMenu.drawTextureBox(b, component.bounds.X, component.bounds.Y, component.bounds.Width, component.bounds.Height, tint);
-
-        int textY = component.bounds.Center.Y - (SpriteText.getHeightOfString(label) / 2);
-        SpriteText.drawStringHorizontallyCenteredAt(
-            b,
-            label,
-            component.bounds.Center.X,
-            textY,
-            color: textColor,
-            maxWidth: component.bounds.Width - 20);
+        this.DrawUiTextCentered(b, label, component.bounds, textColor);
     }
 
     private void DrawArrowButton(SpriteBatch b, ClickableComponent component, bool enabled, bool pointsUp)
@@ -286,26 +340,14 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         this.DrawArrowGlyph(b, component.bounds, color, pointsUp);
     }
 
-    private void DrawWrappedPixelText(SpriteBatch b, string text, Rectangle bounds, Color color)
-    {
-        SpriteText.drawString(
-            b,
-            text,
-            bounds.X,
-            bounds.Y,
-            width: bounds.Width,
-            height: bounds.Height,
-            color: color);
-    }
-
     private void ConfirmSelection()
     {
         try
         {
             this.isWorking = true;
             this.statusMessage = this.selectedCandidate.IsCurrentHost
-                ? "Starting the current host..."
-                : $"Switching to {this.selectedCandidate.Name}, then starting...";
+                ? this.T("status.starting")
+                : this.T("status.switching");
             this.statusColor = new Color(24, 96, 48);
             Game1.playSound("newArtifact");
             this.onConfirm(this.selectedCandidate);
@@ -313,7 +355,7 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         catch (Exception ex)
         {
             this.isWorking = false;
-            this.statusMessage = $"Could not start the save: {ex.Message}";
+            this.statusMessage = this.T("status.start_failed", new { detail = this.TrimStatusDetail(ex.Message) });
             this.statusColor = new Color(128, 32, 32);
             Game1.playSound("cancel");
             this.saveSwapService.LoadSaveSlot(this.save.SaveDirectoryPath);
@@ -322,7 +364,7 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
 
     private void ScrollCandidates(int delta)
     {
-        int maxScroll = Math.Max(0, this.save.Candidates.Count - MaxVisibleCandidates);
+        int maxScroll = Math.Max(0, this.save.Candidates.Count - this.visibleCandidateCount);
         int newValue = Math.Clamp(this.candidateScrollIndex + delta, 0, maxScroll);
         if (newValue == this.candidateScrollIndex)
             return;
@@ -334,7 +376,25 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
 
     private string GetConfirmLabel()
     {
-        return this.selectedCandidate.IsCurrentHost ? "START" : "SWITCH + START";
+        return this.selectedCandidate.IsCurrentHost
+            ? this.T("button.start")
+            : this.T("button.switch");
+    }
+
+    private int GetVisibleCandidateCount()
+    {
+        int listHeight = this.candidatePanelBounds.Height - CandidateHeaderHeight - CandidateInset;
+        return Math.Max(1, (listHeight + RowGap) / (RowHeight + RowGap));
+    }
+
+    private void UpdateSelectionStatus()
+    {
+        this.statusMessage = this.selectedCandidate.IsCurrentHost
+            ? this.T("status.current")
+            : this.T("status.switch");
+        this.statusColor = this.selectedCandidate.IsCurrentHost
+            ? new Color(20, 92, 52)
+            : new Color(120, 72, 24);
     }
 
     private void DrawArrowGlyph(SpriteBatch b, Rectangle bounds, Color color, bool pointsUp)
@@ -351,9 +411,9 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         }
     }
 
-    private static string TrimPixelText(string text, int maxWidth)
+    private string TrimUiText(string text, int maxWidth)
     {
-        if (SpriteText.getWidthOfString(text) <= maxWidth)
+        if (this.MeasureTextWidth(text) <= maxWidth)
             return text;
 
         const string ellipsis = "...";
@@ -361,7 +421,7 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
         while (length > 1)
         {
             string candidate = text[..length] + ellipsis;
-            if (SpriteText.getWidthOfString(candidate) <= maxWidth)
+            if (this.MeasureTextWidth(candidate) <= maxWidth)
                 return candidate;
 
             length--;
@@ -372,7 +432,116 @@ internal sealed class CoopHostPickerMenu : IClickableMenu
 
     private void DrawValueLine(SpriteBatch b, string label, string value, int x, int y, int maxWidth)
     {
-        string text = $"{label}: {value}";
-        SpriteText.drawString(b, TrimPixelText(text, maxWidth), x, y, color: Game1.textColor);
+        this.DrawValueLine(b, label, value, x, y, maxWidth, Game1.textColor);
+    }
+
+    private void DrawValueLine(SpriteBatch b, string label, string value, int x, int y, int maxWidth, Color color)
+    {
+        this.DrawUiText(b, $"{label}: {value}", x, y, maxWidth, color);
+    }
+
+    private void DrawUiText(SpriteBatch b, string text, int x, int y, int maxWidth, Color color)
+    {
+        string trimmed = this.TrimUiText(text, maxWidth);
+        if (this.useRegularFont)
+        {
+            Utility.drawTextWithShadow(b, trimmed, Game1.smallFont, new Vector2(x, y), color);
+            return;
+        }
+
+        SpriteText.drawString(b, trimmed, x, y, color: color);
+    }
+
+    private void DrawUiTextCentered(SpriteBatch b, string text, Rectangle bounds, Color color)
+    {
+        string trimmed = this.TrimUiText(text, bounds.Width - 20);
+        if (this.useRegularFont)
+        {
+            Vector2 size = Game1.smallFont.MeasureString(trimmed);
+            Vector2 position = new(
+                bounds.X + ((bounds.Width - size.X) / 2f),
+                bounds.Y + ((bounds.Height - size.Y) / 2f));
+            Utility.drawTextWithShadow(b, trimmed, Game1.smallFont, position, color);
+            return;
+        }
+
+        int textY = bounds.Center.Y - (SpriteText.getHeightOfString(trimmed) / 2);
+        SpriteText.drawStringHorizontallyCenteredAt(
+            b,
+            trimmed,
+            bounds.Center.X,
+            textY,
+            color: color,
+            maxWidth: bounds.Width - 20);
+    }
+
+    private int MeasureTextWidth(string text)
+    {
+        if (this.useRegularFont)
+            return (int)Math.Ceiling(Game1.smallFont.MeasureString(text).X);
+
+        return SpriteText.getWidthOfString(text);
+    }
+
+    private int GetLineHeight()
+    {
+        if (this.useRegularFont)
+            return (int)Math.Ceiling(Game1.smallFont.MeasureString("Ty").Y);
+
+        return SpriteText.getHeightOfString("TT");
+    }
+
+    private static int ResolveMenuDimension(int viewportSize, int preferredSize, int minimumSize)
+    {
+        int paddedSize = viewportSize - (OuterMargin * 2);
+        if (paddedSize >= minimumSize)
+            return Math.Min(preferredSize, paddedSize);
+
+        return Math.Max(320, viewportSize - 16);
+    }
+
+    private string TrimStatusDetail(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return this.T("status.check_smapi_log");
+
+        string singleLine = message.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return singleLine.Length <= 28
+            ? singleLine
+            : $"{singleLine[..25]}...";
+    }
+
+    private int GetConfirmButtonWidth()
+    {
+        int labelWidth = Math.Max(
+            this.MeasureTextWidth(this.T("button.start")),
+            this.MeasureTextWidth(this.T("button.switch")));
+        int paddedWidth = labelWidth + (this.useRegularFont ? 44 : 56);
+        return Math.Clamp(paddedWidth, MinimumConfirmButtonWidth, MaximumConfirmButtonWidth);
+    }
+
+    private int GetCancelButtonWidth()
+    {
+        int labelWidth = this.MeasureTextWidth(this.T("button.back"));
+        int paddedWidth = labelWidth + (this.useRegularFont ? 36 : 48);
+        return Math.Clamp(paddedWidth, MinimumCancelButtonWidth, MaximumCancelButtonWidth);
+    }
+
+    private string T(string key)
+    {
+        return this.i18n.Get(key).ToString();
+    }
+
+    private string T(string key, object tokens)
+    {
+        return this.i18n.Get(key, tokens).ToString();
+    }
+
+    private static string FormatShortId(long uniqueMultiplayerId)
+    {
+        string raw = uniqueMultiplayerId.ToString();
+        return raw.Length <= 6
+            ? raw
+            : $"...{raw[^6..]}";
     }
 }

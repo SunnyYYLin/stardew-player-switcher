@@ -17,10 +17,12 @@ public sealed class ModEntry : Mod
     private readonly Harmony harmony = new("sunnylin.StardewPlayerSwitcher");
 
     private SaveSwapService saveSwapService = null!;
+    private ITranslationHelper translations = null!;
 
     public override void Entry(IModHelper helper)
     {
         Instance = this;
+        this.translations = helper.Translation;
 
         string backupRootPath = Path.Combine(this.Helper.DirectoryPath, "backups");
         this.saveSwapService = new SaveSwapService(this.Monitor, Constants.SavesPath, backupRootPath);
@@ -29,7 +31,7 @@ public sealed class ModEntry : Mod
 
         helper.ConsoleCommands.Add(
             "sps_choose_host",
-            "Open the host picker for the currently visible co-op host menu save.",
+            this.T("command.choose_host.description"),
             this.OnChooseHostCommand);
     }
 
@@ -57,6 +59,7 @@ public sealed class ModEntry : Mod
             this.ShowMenu(new CoopHostPickerMenu(
                 summary,
                 this.saveSwapService,
+                this.translations,
                 candidate => this.StartSelectedSave(farmer.slotName, isMultiplayer, summary, candidate),
                 () => this.ShowMenu(coopMenu)));
 
@@ -64,7 +67,7 @@ public sealed class ModEntry : Mod
         }
         catch (Exception ex)
         {
-            this.Monitor.Log($"Failed to open host picker, falling back to the game's default host flow.\n{ex}", LogLevel.Error);
+            this.Monitor.Log($"{this.T("log.open_picker_failed")}\n{ex}", LogLevel.Error);
             return true;
         }
     }
@@ -108,17 +111,22 @@ public sealed class ModEntry : Mod
     {
         if (TitleMenu.subMenu is not CoopMenu coopMenu)
         {
-            this.Monitor.Log("Open Co-op -> Host first, then use this command if you need to test the picker manually.", LogLevel.Info);
+            this.Monitor.Log(this.T("log.open_coop_first"), LogLevel.Info);
             return;
         }
 
         object? slot = coopMenu.MenuSlots.FirstOrDefault(slot => slot.GetType().FullName == "StardewValley.Menus.CoopMenu+HostFileSlot");
         if (slot is null)
         {
-            this.Monitor.Log("No host save slot is currently available in the co-op menu.", LogLevel.Info);
+            this.Monitor.Log(this.T("log.no_host_slot"), LogLevel.Info);
             return;
         }
 
         this.InterceptHostFileSlotActivation(slot);
+    }
+
+    private string T(string key)
+    {
+        return this.translations.Get(key).ToString();
     }
 }
