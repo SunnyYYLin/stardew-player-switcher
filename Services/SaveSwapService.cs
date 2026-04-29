@@ -11,6 +11,17 @@ namespace StardewPlayerSwitcher.Services;
 
 internal sealed class SaveSwapService
 {
+    private static readonly string[] HousingSlotFields =
+    {
+        "homeLocation",
+        "houseUpgradeLevel",
+        "daysUntilHouseUpgrade",
+        "mailbox",
+        "mostRecentBed",
+        "lastSleepLocation",
+        "lastSleepPoint",
+    };
+
     private readonly IMonitor monitor;
     private readonly string savesRootPath;
     private readonly string backupRootPath;
@@ -119,7 +130,15 @@ internal sealed class SaveSwapService
 
         XElement newPlayerElement = CloneFarmerElement(targetFarmhandElement, "player");
         XElement newFarmhandElement = CloneFarmerElement(playerElement, "Farmer");
-        XElement saveGameInfoFarmer = CloneFarmerElement(targetFarmhandElement, "Farmer");
+
+        // The selected host takes over the current host's housing slot.
+        // Without this, the identity swap can leave the host tied to the wrong cabin/house interior.
+        ApplyHousingSlot(playerElement, newPlayerElement);
+        ApplyHousingSlot(targetFarmhandElement, newFarmhandElement);
+        UpdateCabinFarmhandReference(root, ReadString(playerElement, "homeLocation"), ReadLong(newPlayerElement, "UniqueMultiplayerID"));
+        UpdateCabinFarmhandReference(root, ReadString(targetFarmhandElement, "homeLocation"), ReadLong(newFarmhandElement, "UniqueMultiplayerID"));
+
+        XElement saveGameInfoFarmer = CloneFarmerElement(newPlayerElement, "Farmer");
 
         playerElement.ReplaceWith(newPlayerElement);
         targetFarmhandElement.ReplaceWith(newFarmhandElement);
@@ -173,6 +192,55 @@ internal sealed class SaveSwapService
         XElement clone = new(source);
         clone.Name = elementName;
         return clone;
+    }
+
+    private static void ApplyHousingSlot(XElement slotSource, XElement farmerTarget)
+    {
+        foreach (string fieldName in HousingSlotFields)
+            CopyChildElement(slotSource, farmerTarget, fieldName);
+    }
+
+    private static void UpdateCabinFarmhandReference(XElement saveRoot, string homeLocation, long farmerId)
+    {
+        if (string.IsNullOrWhiteSpace(homeLocation) || farmerId == 0)
+            return;
+
+        foreach (XElement indoorsElement in saveRoot
+                     .Descendants("indoors")
+                     .Where(indoors => string.Equals(ReadString(indoors, "uniqueName"), homeLocation, StringComparison.Ordinal)))
+        {
+            SetOrReplaceChildValue(indoorsElement, "farmhandReference", farmerId.ToString(CultureInfo.InvariantCulture));
+        }
+    }
+
+    private static void CopyChildElement(XElement sourceParent, XElement targetParent, string childName)
+    {
+        XElement? sourceChild = sourceParent.Element(childName);
+        XElement? targetChild = targetParent.Element(childName);
+
+        if (sourceChild is null)
+        {
+            targetChild?.Remove();
+            return;
+        }
+
+        XElement clone = new(sourceChild);
+        if (targetChild is null)
+            targetParent.Add(clone);
+        else
+            targetChild.ReplaceWith(clone);
+    }
+
+    private static void SetOrReplaceChildValue(XElement parent, string childName, string value)
+    {
+        XElement? child = parent.Element(childName);
+        if (child is null)
+        {
+            parent.Add(new XElement(childName, value));
+            return;
+        }
+
+        child.Value = value;
     }
 
     private static string GetSaveFilePath(string saveDirectoryPath)
